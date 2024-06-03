@@ -49,6 +49,12 @@ class Character:
         self.target_pos = None
         self.is_moving = False
         self.animation_delay = 0
+        self.stats = {
+            'str': 1,
+            'def': 1,
+            'acc': 1,
+            'hp': 10
+        }
 
     def load_animations(self):
         animations = {
@@ -108,6 +114,16 @@ class Character:
         iso_x, iso_y = cart_to_iso(self.cart_x, self.cart_y)
         screen.blit(self.animations[self.direction][self.frame], (iso_x + offset_x, iso_y + offset_y - CHARACTER_HEIGHT // 2))
 
+class Enemy(Character):
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.stats = {
+            'str': 0,
+            'def': 0,
+            'acc': 0,
+            'hp': 5
+        }
+
 def generate_map():
     map_width = 20
     map_height = 15
@@ -139,17 +155,31 @@ def draw_map(game_map, offset_x, offset_y):
                 iso_x, iso_y = cart_to_iso(x, y)
                 screen.blit(tile, (iso_x + offset_x, iso_y + offset_y))
 
+def roll_d20():
+    return random.randint(1, 20)
+
+def attack(attacker, defender):
+    attack_roll = roll_d20() + attacker.stats['str']
+    defense_roll = roll_d20() + defender.stats['def']
+    damage = max(0, attack_roll - defense_roll)
+    defender.stats['hp'] -= damage
+
 player = Character(SCREEN_WIDTH // (2 * ISO_TILE_WIDTH), SCREEN_HEIGHT // (2 * ISO_TILE_HEIGHT))
+enemies = [Enemy(random.randint(0, 19), random.randint(0, 14)) for _ in range(5)]
 
 game_map = generate_map()
 
 def character_update_thread():
     while running:
         player.update()
+        for enemy in enemies:
+            enemy.update()
         pygame.time.wait(30)
 
 running = True
 threading.Thread(target=character_update_thread, daemon=True).start()
+
+current_target = None
 
 while running:
     screen.fill((0, 0, 0))
@@ -159,8 +189,13 @@ while running:
             running = False
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mouse_x, mouse_y = pygame.mouse.get_pos()
-            target_cart_x, target_cart_y = iso_to_cart(mouse_x, mouse_y)
-            player.target_pos = (target_cart_x, target_cart_y)
+            cart_x, cart_y = iso_to_cart(mouse_x, mouse_y)
+            for enemy in enemies:
+                if enemy.cart_x == cart_x and enemy.cart_y == cart_y:
+                    current_target = enemy
+                    break
+            if not current_target:
+                player.target_pos = (cart_x, cart_y)
 
     keys = pygame.key.get_pressed()
     if keys[pygame.K_w]:
@@ -178,6 +213,19 @@ while running:
 
     draw_map(game_map, offset_x, offset_y)
     player.draw(screen, offset_x, offset_y)
+
+    for enemy in enemies:
+        if enemy.stats['hp'] > 0:
+            enemy.draw(screen, offset_x, offset_y)
+        else:
+            enemies.remove(enemy)
+            if current_target == enemy:
+                current_target = None
+
+    if current_target:
+        attack(player, current_target)
+        if current_target.stats['hp'] <= 0:
+            current_target = None
 
     pygame.display.flip()
     clock.tick(FPS)
